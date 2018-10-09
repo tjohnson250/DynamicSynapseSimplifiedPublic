@@ -4,7 +4,7 @@ Created on Thu Oct  6 20:32:58 2016
 
 @author: chitianqilin
 """
-
+# Runge-Kutta RK4 method for approximate solutions of ODEs: https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods
 def rk4(h, y, inputs, f):
         k1 = f(y, inputs)
         k2 = f(y + 0.5*h*k1, inputs)

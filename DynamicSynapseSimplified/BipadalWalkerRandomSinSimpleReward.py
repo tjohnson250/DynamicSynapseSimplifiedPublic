@@ -36,7 +36,7 @@ def ChooseRecordingPath(experiment, TimeOfRecording):
     elif platform.node()=='chitianqilin-lt':
         path='G:/recording/OpenAIGym/'+experiment+'/'+TimeOfRecording+'/'
     else:
-        path=''
+        path='./'+experiment+'/'+TimeOfRecording+'/'
     if not os.path.exists(path):
         os.makedirs(path)        
     return path
@@ -53,7 +53,7 @@ def ChooseResultPath(experiment, TimeOfRecording):
     elif platform.node()=='chitianqilin-lt':
         path='G:/SimulationResult/OpenAIGym/'+experiment+'/'+TimeOfRecording+'/'
     else:
-        path=''
+        path='./'+experiment+'/'+TimeOfRecording+'/'
     if not os.path.exists(path):
         os.makedirs(path)        
     return path
@@ -166,6 +166,7 @@ if __name__ == "__main__":
         num_states = env.observation_space.shape[0]
         num_actions = env.action_space.shape[0]    
         observation = env.reset()
+        # Layer 1 in Fig 5., fully connected to Layer 2, which has 8 neurons (num_actions*2) for the bipedal walker
         NumberOfSynapses = np.array([num_actions*2, (num_states-10)*2+(10)+1+num_actions])
   #      Weighters= np.ones((NumberOfNeuron,NumberOfSynapses))*0.2+ 0.1 * np.random.rand(NumberOfNeuron,NumberOfSynapses)#np.random.rand(NumberOfNeuron,NumberOfSynapses) #0.5*np.ones(NumberOfSynapses) +0.001*np.random.rand(NumberOfSynapses)  #
 
@@ -174,18 +175,25 @@ if __name__ == "__main__":
         T = 0
         
 #        Weighters= np.ones(NumberOfSynapses)*0+ 0.4* (np.random.rand(*NumberOfSynapses)-0.5)
+        # Weights fluctuate around these centers. Centers are adjusted in the direction of the synaptic weight at the time of the reward. 
+        # It appears that this set of centers are unused in favor of passing in None to produce random centres
         WeightersCentre = np.ones(NumberOfSynapses)*0.1+ 0.2* (np.random.rand(*NumberOfSynapses)-0.5)
 
+        # Create layer 1 to 2 synapses: These synapses use the bio-inspired learning rule. 
         ADSA=DSA.DynamicSynapseArray(NumberOfSynapses , Period=20000, tInPeriod=None, PeriodVar=0.1,\
                  Amp=0.2, WeightersCentre = None, WeightersCentreUpdateRate = 0.000012, WeightersOscilateDecay=0.0000003/100) #Amp=0.2
 
+        # Create Layer 2 synapses. Layer 2 feeds into 2 FitzHugh-Nagumo Oscillators, so there are 2*8+1 synapses
+        # Unclear what the extra input is for
         NumberOfSynapses2 = np.array([2, num_actions*2+1])
         ADSA2=DSA.DynamicSynapseArray(NumberOfSynapses2 , Period=20000, tInPeriod=None, PeriodVar=0.1,\
                  Amp=0.2, WeightersCentre = None, WeightersCentreUpdateRate = 0.000012, WeightersOscilateDecay=0.0000003/100) #Amp=0.2
 
+        # Create Layer 3: the 2 Fitzhugh-Nagumo Oscillators
         AFHNN = FN.FHNN(2,scale = 0.02)
         AFHNN.InitRecording()        
-        
+        # Layer 3's synapses feed into Layer 4, which combines the 14 non-lidar states of the robot, with
+        # the 4 outputs of Layer 3. Unclear about the extra input (perhaps a constant?)
         NumberOfSynapses3 = np.array([num_actions, 4+14+1])
         # original
         WeightersCentre=np.array([[0,0,-0.5,0,0,0,0,0,-0.2,-0.2,0,0,0,0,0,0,0,0,0],
@@ -273,7 +281,7 @@ if __name__ == "__main__":
     for filename in os.listdir(os.getcwd()):
         if filename.endswith(".py"): 
             shutil.copy2(filename, codepath)
-    with open(ChooseResultPath(experiment, TimeOfRecording)+'ReadMe', 'ab') as fReadMe:
+    with open(ChooseResultPath(experiment, TimeOfRecording)+'ReadMe', 'at') as fReadMe:
         fReadMe.write('''RepulsiveLearning = %r
 Adaption = %s
 RandomSeed = %d''' %(args.Repulsive, args.Adaption, RandomSeed))
@@ -311,6 +319,7 @@ RandomSeed = %d''' %(args.Repulsive, args.Adaption, RandomSeed))
 #                       0.00483423, 0.01991292, 0.13640185, 0.19855782, 0.1782773,  0.19834147,
  #                      0.01808887, 0.12016349, 0.04105342, 0.08570815]]
 #            output=np.dot(Weights, np.hstack((np.tanh(ObPreProcess(observation)),relu(action),-relu(-action))))
+            # Calculate Layer 1 output to feed to layer 2
             Neuron1Out=relu(np.tanh(np.dot(Weights, np.tanh(MergeInputs(ObPreProcess(observation),action)))*NeuronSensitivity))
             if Adaption == "Nonlinear":
                 NeuronSensitivity += ((0.3-np.abs(0-Neuron1Out))*NeuronSensitivityUpdateRate*dt)*(2-np.log10(NeuronSensitivity))*(np.log10(NeuronSensitivity)-(-2))/4
@@ -320,10 +329,12 @@ RandomSeed = %d''' %(args.Repulsive, args.Adaption, RandomSeed))
             if Info:
                 print('Neuron1Out')
                 print(Neuron1Out)
+            # Caclulate output of Layer 2 and pass into Layer 3: two Fitz-Hugh Nagamo Oscillators
             Weights2=ADSA2.Weighters[:, :]
             CPGInput=np.tanh(np.dot(Weights2, np.hstack((Neuron1Out,1))))
+            # Calculate Layer 3 output
             CPGOutput = np.array((AFHNN.Vn, AFHNN.Wn)).ravel()
-
+            # Calculate output of Layer 4
             action = np.tanh(np.dot(ADSA3.Weighters,np.hstack((CPGOutput, observation[0:14],1))))#/10*dt #+NeuronSensitivity2*dt            
             observation, reward, done, info = env.step(action)
             EpisodeReward += reward
